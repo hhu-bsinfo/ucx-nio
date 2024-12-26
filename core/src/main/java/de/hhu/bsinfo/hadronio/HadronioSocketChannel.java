@@ -8,6 +8,7 @@ import de.hhu.bsinfo.hadronio.util.MemoryUtil.Alignment;
 import de.hhu.bsinfo.hadronio.util.MessageUtil;
 import de.hhu.bsinfo.hadronio.util.RingBuffer;
 import de.hhu.bsinfo.hadronio.util.TagUtil;
+import org.agrona.BufferUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.AtomicBuffer;
 import org.agrona.concurrent.MessageHandler;
@@ -329,6 +330,7 @@ public class HadronioSocketChannel extends SocketChannel implements HadronioSele
         endpoint.close();
         sendBuffer.alignedBuffer().free();
         receiveBuffer.alignedBuffer().free();
+        BufferUtil.free(flushBuffer);
     }
 
     @Override
@@ -452,21 +454,23 @@ public class HadronioSocketChannel extends SocketChannel implements HadronioSele
     }
 
     void establishConnection() {
-        final var sendBuffer = new MemoryUtil.AlignedBuffer(2 * Long.BYTES, Alignment.PAGE).buffer();
-        final var receiveBuffer = new MemoryUtil.AlignedBuffer(2 * Long.BYTES, Alignment.PAGE).buffer();
+        final var sendBuffer = new MemoryUtil.AlignedBuffer(2 * Long.BYTES, Alignment.PAGE);
+        final var receiveBuffer = new MemoryUtil.AlignedBuffer(2 * Long.BYTES, Alignment.PAGE);
 
         final long localId = TagUtil.generateId();
         final long checksum = TagUtil.calculateChecksum(localId);
-        sendBuffer.putLong(0, localId);
-        sendBuffer.putLong(Long.BYTES, checksum);
+        sendBuffer.buffer().putLong(0, localId);
+        sendBuffer.buffer().putLong(Long.BYTES, checksum);
 
-        final var connectionCallback = new ConnectionCallback(this, receiveBuffer, localId);
+        final var connectionCallback = new ConnectionCallback(this, receiveBuffer.buffer(), localId);
         endpoint.setSendCallback(connectionCallback);
         endpoint.setReceiveCallback(connectionCallback);
 
         if (DebugConfig.DEBUG) LOGGER.debug("Exchanging tags to establish connection");
-        endpoint.sendStream(sendBuffer.addressOffset(), 2 * Long.BYTES, true, true);
-        endpoint.receiveStream(receiveBuffer.addressOffset(), 2 * Long.BYTES, true, false);
+        endpoint.sendStream(sendBuffer.buffer().addressOffset(), 2 * Long.BYTES, true, true);
+        endpoint.receiveStream(receiveBuffer.buffer().addressOffset(), 2 * Long.BYTES, true, false);
+        receiveBuffer.free();
+        sendBuffer.free();
     }
 
     private int readBlocking(final ByteBuffer target) throws IOException {
